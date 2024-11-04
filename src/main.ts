@@ -4,6 +4,8 @@ import "./style.css";
 import "./leafletWorkaround.ts";
 import luck from "./luck.ts";
 
+let playerPoints = 0;
+
 const OAKES_CLASSROOM_POSITION = leaflet.latLng(
   36.98949379578401,
   -122.06277128548504,
@@ -15,12 +17,17 @@ const NEIGHBORHOOD_SIZE = 8;
 const CACHE_SPAWN_PROBABILITY = 0.1;
 
 interface Cache {
-  x: number;
-  y: number;
-  value: number;
+  numCoins: number;
 }
 
-const caches: Cache[] = [];
+interface Cell {
+  readonly x: number;
+  readonly y: number;
+  cache: Cache;
+  popupDiv: HTMLDivElement;
+}
+
+const cells: Cell[] = [];
 
 const map = leaflet.map(document.getElementById("map")!, {
   center: OAKES_CLASSROOM_POSITION,
@@ -46,11 +53,36 @@ playerMarker.addTo(map);
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "No coins yet...";
 
-function spawnCache(x: number, y: number): Cache {
-  const currentCache: Cache = {
+function updateCellAndStatus(cell: Cell) {
+  cell.popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = cell.cache
+    .numCoins.toString();
+  statusPanel.innerHTML = `You have: ${playerPoints} points.`;
+}
+
+function collectCoinFromCell(cell: Cell) {
+  if (cell.cache.numCoins > 0) {
+    cell.cache.numCoins--;
+    playerPoints++;
+    updateCellAndStatus(cell);
+  }
+}
+
+function depositCoinToCell(cell: Cell) {
+  if (playerPoints > 0) {
+    playerPoints--;
+    cell.cache.numCoins++;
+    updateCellAndStatus(cell);
+  }
+}
+
+function spawnCache(x: number, y: number): Cell {
+  const currentCell: Cell = {
     x,
     y,
-    value: Math.floor(luck([x, y, "initialValue"].toString()) * MAX_COINS),
+    cache: {
+      numCoins: Math.floor(luck([x, y, "initialValue"].toString()) * MAX_COINS),
+    },
+    popupDiv: document.createElement("div"),
   };
   const origin = OAKES_CLASSROOM_POSITION;
   const bounds = leaflet.latLngBounds([
@@ -62,18 +94,29 @@ function spawnCache(x: number, y: number): Cache {
   rect.addTo(map);
 
   rect.bindPopup(() => {
-    const popupDiv = document.createElement("div");
-    popupDiv.innerHTML = `
-                <div>There is a cache here at (${x},${y}). It has <span id="value">${currentCache.value}</span> coins.</div>`;
-    return popupDiv;
+    currentCell.popupDiv.innerHTML = `
+                <div>There is a cache here at (${x},${y}). It has <span id="value">${currentCell.cache.numCoins}</span> coins.</div>`;
+    const getButton = document.createElement("button");
+    getButton.innerText = "Collect coin";
+    currentCell.popupDiv.appendChild(getButton);
+    const putButton = document.createElement("button");
+    putButton.innerText = "Deposit coin";
+    currentCell.popupDiv.appendChild(putButton);
+    getButton.addEventListener("click", () => {
+      collectCoinFromCell(currentCell);
+    });
+    putButton.addEventListener("click", () => {
+      depositCoinToCell(currentCell);
+    });
+    return currentCell.popupDiv;
   });
-  return currentCache;
+  return currentCell;
 }
 
 for (let x = -NEIGHBORHOOD_SIZE; x < NEIGHBORHOOD_SIZE; x++) {
   for (let y = -NEIGHBORHOOD_SIZE; y < NEIGHBORHOOD_SIZE; y++) {
     if (luck([x, y].toString()) < CACHE_SPAWN_PROBABILITY) {
-      caches.push(spawnCache(x, y));
+      cells.push(spawnCache(x, y));
     }
   }
 }
