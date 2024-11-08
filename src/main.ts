@@ -3,6 +3,7 @@ import "leaflet/dist/leaflet.css";
 import "./style.css";
 import "./leafletWorkaround.ts";
 import luck from "./luck.ts";
+import { Board, Cache, Cell } from "./board.ts";
 
 let playerPoints = 0;
 
@@ -11,23 +12,11 @@ const OAKES_CLASSROOM_POSITION = leaflet.latLng(
   -122.06277128548504,
 );
 const ZOOM_LEVEL = 19;
+const TILE_RADIUS = 10;
 const TILE_DEGREES = 1e-4;
-const MAX_COINS = 100;
-const NEIGHBORHOOD_SIZE = 8;
 const CACHE_SPAWN_PROBABILITY = 0.1;
 
-interface Cache {
-  numCoins: number;
-}
-
-interface Cell {
-  readonly x: number;
-  readonly y: number;
-  cache: Cache;
-  popupDiv: HTMLDivElement;
-}
-
-const cells: Cell[] = [];
+const board = new Board(TILE_DEGREES, TILE_RADIUS);
 
 const map = leaflet.map(document.getElementById("map")!, {
   center: OAKES_CLASSROOM_POSITION,
@@ -39,7 +28,7 @@ const map = leaflet.map(document.getElementById("map")!, {
 });
 
 leaflet
-  .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  .tileLayer("https://{s}.tile.thunderforest.com/pioneer/{z}/{x}/{y}.png", {
     maxZoom: ZOOM_LEVEL,
     attribution:
       '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -53,70 +42,55 @@ playerMarker.addTo(map);
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "No coins yet...";
 
-function updateCellAndStatus(cell: Cell) {
-  cell.popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = cell.cache
-    .numCoins.toString();
+function updateCellAndStatus(cache: Cache, popupDiv: HTMLDivElement) {
+  popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = cache.numCoins
+    .toString();
   statusPanel.innerHTML = `You have: ${playerPoints} points.`;
 }
 
-function collectCoinFromCell(cell: Cell) {
-  if (cell.cache.numCoins > 0) {
-    cell.cache.numCoins--;
+function collectCoinFromCell(cache: Cache, popupDiv: HTMLDivElement) {
+  if (cache.numCoins > 0) {
+    cache.numCoins--;
     playerPoints++;
-    updateCellAndStatus(cell);
+    updateCellAndStatus(cache, popupDiv);
   }
 }
 
-function depositCoinToCell(cell: Cell) {
+function depositCoinToCell(cache: Cache, popupDiv: HTMLDivElement) {
   if (playerPoints > 0) {
     playerPoints--;
-    cell.cache.numCoins++;
-    updateCellAndStatus(cell);
+    cache.numCoins++;
+    updateCellAndStatus(cache, popupDiv);
   }
 }
 
-function spawnCache(x: number, y: number): Cell {
-  const currentCell: Cell = {
-    x,
-    y,
-    cache: {
-      numCoins: Math.floor(luck([x, y, "initialValue"].toString()) * MAX_COINS),
-    },
-    popupDiv: document.createElement("div"),
-  };
-  const origin = OAKES_CLASSROOM_POSITION;
-  const bounds = leaflet.latLngBounds([
-    [origin.lat + x * TILE_DEGREES, origin.lng + y * TILE_DEGREES],
-    [origin.lat + (x + 1) * TILE_DEGREES, origin.lng + (y + 1) * TILE_DEGREES],
-  ]);
-
-  const rect = leaflet.rectangle(bounds);
+function spawnCache(cell: Cell) {
+  const rect = leaflet.rectangle(board.getCellBounds(cell));
   rect.addTo(map);
 
   rect.bindPopup(() => {
-    currentCell.popupDiv.innerHTML = `
-                <div>There is a cache here at (${x},${y}). It has <span id="value">${currentCell.cache.numCoins}</span> coins.</div>`;
+    const popupDiv = board.getCellDiv(cell);
+    const cache = board.getCellCache(cell);
+    popupDiv!.innerHTML = `
+                <div>There is a cache here at (${cell.x},${cell.y}). It has <span id="value">${cache.numCoins}</span> coins.</div>`;
     const getButton = document.createElement("button");
     getButton.innerText = "Collect coin";
-    currentCell.popupDiv.appendChild(getButton);
+    popupDiv!.appendChild(getButton);
     const putButton = document.createElement("button");
     putButton.innerText = "Deposit coin";
-    currentCell.popupDiv.appendChild(putButton);
+    popupDiv!.appendChild(putButton);
     getButton.addEventListener("click", () => {
-      collectCoinFromCell(currentCell);
+      collectCoinFromCell(cache, popupDiv);
     });
     putButton.addEventListener("click", () => {
-      depositCoinToCell(currentCell);
+      depositCoinToCell(cache, popupDiv);
     });
-    return currentCell.popupDiv;
+    return popupDiv;
   });
-  return currentCell;
 }
 
-for (let x = -NEIGHBORHOOD_SIZE; x < NEIGHBORHOOD_SIZE; x++) {
-  for (let y = -NEIGHBORHOOD_SIZE; y < NEIGHBORHOOD_SIZE; y++) {
-    if (luck([x, y].toString()) < CACHE_SPAWN_PROBABILITY) {
-      cells.push(spawnCache(x, y));
-    }
+board.getCellsNearPoint(playerMarker.getLatLng()).forEach((cell) => {
+  if (luck([cell.x, cell.y].toString()) < CACHE_SPAWN_PROBABILITY) {
+    spawnCache(cell);
   }
-}
+});
