@@ -3,9 +3,9 @@ import "leaflet/dist/leaflet.css";
 import "./style.css";
 import "./leafletWorkaround.ts";
 import luck from "./luck.ts";
-import { Board, Cache, Cell } from "./board.ts";
+import { Board, Cache, Cell, Coin } from "./board.ts";
 
-let playerPoints = 0;
+const playerCoins: Coin[] = [];
 
 const OAKES_CLASSROOM_POSITION = leaflet.latLng(
   36.98949379578401,
@@ -43,23 +43,31 @@ const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "No coins yet...";
 
 function updateCellAndStatus(cache: Cache, popupDiv: HTMLDivElement) {
-  popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = cache.numCoins
-    .toString();
-  statusPanel.innerHTML = `You have: ${playerPoints} points.`;
+  const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
+  popupText!.innerHTML = "";
+  for (let i = 0; i < cache.coins.length; i++) {
+    popupText!.innerHTML += cache.coins[i].toString();
+  }
+  statusPanel!.innerHTML =
+    `<pre>You have ${playerCoins.length} coins: \n</pre>`;
+  for (let i = 0; i < playerCoins.length; i++) {
+    const coin = playerCoins[i];
+    statusPanel!.innerHTML! += coin.toString();
+  }
 }
 
 function collectCoinFromCell(cache: Cache, popupDiv: HTMLDivElement) {
-  if (cache.numCoins > 0) {
-    cache.numCoins--;
-    playerPoints++;
+  if (cache.coins.length > 0) {
+    const currentCoin = cache.coins.pop()!;
+    playerCoins.push(currentCoin);
     updateCellAndStatus(cache, popupDiv);
   }
 }
 
 function depositCoinToCell(cache: Cache, popupDiv: HTMLDivElement) {
-  if (playerPoints > 0) {
-    playerPoints--;
-    cache.numCoins++;
+  if (playerCoins.length > 0) {
+    const currentCoin = playerCoins.pop()!;
+    cache.coins.push(currentCoin);
     updateCellAndStatus(cache, popupDiv);
   }
 }
@@ -72,7 +80,19 @@ function spawnCache(cell: Cell) {
     const popupDiv = board.getCellDiv(cell);
     const cache = board.getCellCache(cell);
     popupDiv!.innerHTML = `
-                <div>There is a cache here at (${cell.x},${cell.y}). It has <span id="value">${cache.numCoins}</span> coins.</div>`;
+                <div>There is a cache here at (${
+      cell.x.toFixed(
+        4,
+      )
+    },${
+      cell.y.toFixed(
+        4,
+      )
+    }). It has coins: <span id='value'></span></div>`;
+    const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
+    for (let i = 0; i < cache.coins.length; i++) {
+      popupText!.innerHTML += cache.coins[i].toString();
+    }
     const getButton = document.createElement("button");
     getButton.innerText = "Collect coin";
     popupDiv!.appendChild(getButton);

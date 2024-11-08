@@ -1,8 +1,15 @@
 import leaflet from "leaflet";
 import luck from "./luck.ts";
 
+export interface Coin {
+  cell: Cell;
+  serial: number;
+
+  toString(): void;
+}
+
 export interface Cache {
-  numCoins: number;
+  coins: Coin[];
 }
 
 export interface Cell {
@@ -18,7 +25,7 @@ export class Board {
   private readonly knownCache: Map<string, Cache>;
   private readonly knownDiv: Map<string, HTMLDivElement>;
 
-  private MAX_COINS = 100;
+  private MAX_COINS = 5;
 
   constructor(tileWidth: number, tileVisibilityRadius: number) {
     this.tileWidth = tileWidth;
@@ -31,13 +38,21 @@ export class Board {
   private getCanonicalCell(cell: Cell): Cell {
     const { x, y } = cell;
     const key = [x, y].toString();
-    if (!(this.knownCells.has(key))) {
+    if (!this.knownCells.has(key)) {
       this.knownCells.set(key, { x, y });
-      this.knownCache.set(key, {
-        numCoins: Math.floor(
-          luck([x, y, "initialValue"].toString()) * this.MAX_COINS,
-        ),
-      });
+      const newCoinsArray: Coin[] = [];
+      const numCoins = Math.floor(
+        luck([x, y, "initialValue"].toString()) * this.MAX_COINS,
+      );
+      for (let i = 0; i < numCoins; i++) {
+        newCoinsArray.push({
+          cell: cell,
+          serial: i,
+          toString: () =>
+            `<pre>${cell.x.toFixed(4)}:${cell.y.toFixed(4)}, serial:${i}</pre>`,
+        });
+      }
+      this.knownCache.set(key, { coins: newCoinsArray });
       this.knownDiv.set(key, document.createElement("div"));
     }
     return this.knownCells.get(key)!;
@@ -60,14 +75,8 @@ export class Board {
 
   getCellBounds(cell: Cell): leaflet.LatLngBounds {
     return leaflet.latLngBounds(
-      leaflet.latLng(
-        cell.x,
-        cell.y,
-      ),
-      leaflet.latLng(
-        cell.x + this.tileWidth,
-        cell.y + this.tileWidth,
-      ),
+      leaflet.latLng(cell.x, cell.y),
+      leaflet.latLng(cell.x + this.tileWidth, cell.y + this.tileWidth),
     );
   }
 
