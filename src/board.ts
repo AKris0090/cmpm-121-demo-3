@@ -8,8 +8,56 @@ export interface Coin {
   toString(): void;
 }
 
+export function createCoin(cell: Cell, serial: number): Coin {
+  const newCoin: Coin = {
+    cell,
+    serial,
+    toString() {
+      return `<pre>${cell.x.toFixed(4)}:${
+        cell.y.toFixed(4)
+      }, serial:${serial}</pre>`;
+    },
+  };
+
+  return newCoin;
+}
+
 export interface Cache {
   coins: Coin[];
+
+  toMomento(): string;
+  fromMomento(momento: string): void;
+}
+
+export function newCache(cell: Cell, maxCoins: number): Cache {
+  const newCache: Cache = {
+    coins: [],
+
+    toMomento() {
+      return JSON.stringify({
+        coins: this.coins,
+      });
+    },
+    fromMomento(momento: string) {
+      this.coins = [];
+      const parsed = JSON.parse(momento);
+      for (let i = 0; i < parsed.coins.length; i++) {
+        const parsedCoin = parsed.coins[i];
+        const newCoin: Coin = createCoin(parsedCoin.cell, parsedCoin.serial);
+        this.coins.push(newCoin);
+      }
+    },
+  };
+
+  const numCoins =
+    luck([cell.x, cell.y, "https://github.com/AKris0090/Orchid"].toString()) *
+    maxCoins;
+  console.log(numCoins, maxCoins);
+  for (let i = 0; i < numCoins; i++) {
+    newCache.coins.push(createCoin(cell, i));
+  }
+
+  return newCache;
 }
 
 export interface Cell {
@@ -19,20 +67,45 @@ export interface Cell {
 
 export class Board {
   readonly tileWidth: number;
+  readonly halfTileWidth: number;
   readonly tileVisibilityRadius: number;
+  readonly cacheSpawnProbability: number;
+  readonly maxCoins: number;
 
   private readonly knownCells: Map<string, Cell>;
-  private readonly knownCache: Map<string, Cache>;
-  private readonly knownDiv: Map<string, HTMLDivElement>;
+  private readonly knownCaches: Map<string, string>;
+  private readonly currentlyVisibleCaches: Map<string, Cache>;
 
-  private MAX_COINS = 5;
-
-  constructor(tileWidth: number, tileVisibilityRadius: number) {
+  constructor(
+    tileWidth: number,
+    tileVisibilityRadius: number,
+    cacheSpawnProbability: number,
+    maxCoins: number,
+  ) {
     this.tileWidth = tileWidth;
     this.tileVisibilityRadius = tileVisibilityRadius;
+    this.cacheSpawnProbability = cacheSpawnProbability;
+    this.halfTileWidth = tileWidth / 2;
+    this.maxCoins = maxCoins;
     this.knownCells = new Map();
-    this.knownCache = new Map();
-    this.knownDiv = new Map();
+    this.knownCaches = new Map();
+    this.currentlyVisibleCaches = new Map();
+  }
+
+  private generateCache(cell: Cell): Cache {
+    const { x, y } = cell;
+    const key = [x, y].toString();
+    if (!this.knownCaches.has(key)) {
+      const currentCache = newCache({
+        x: cell.x * this.tileWidth,
+        y: cell.y * this.tileWidth,
+      }, this.maxCoins);
+      this.knownCaches.set(key, currentCache.toMomento());
+      return currentCache;
+    }
+    const existingCache: Cache = newCache(cell, 0);
+    existingCache.fromMomento(this.knownCaches.get(key)!);
+    return existingCache;
   }
 
   private getCanonicalCell(cell: Cell): Cell {
@@ -40,48 +113,41 @@ export class Board {
     const key = [x, y].toString();
     if (!this.knownCells.has(key)) {
       this.knownCells.set(key, { x, y });
-      const newCoinsArray: Coin[] = [];
-      const numCoins = Math.floor(
-        luck([x, y, "initialValue"].toString()) * this.MAX_COINS,
-      );
-      for (let i = 0; i < numCoins; i++) {
-        newCoinsArray.push({
-          cell: cell,
-          serial: i,
-          toString: () =>
-            `<pre>${cell.x.toFixed(4)}:${cell.y.toFixed(4)}, serial:${i}</pre>`,
-        });
-      }
-      this.knownCache.set(key, { coins: newCoinsArray });
-      this.knownDiv.set(key, document.createElement("div"));
     }
     return this.knownCells.get(key)!;
   }
 
-  getCellForPoint(point: leaflet.LatLng): Cell {
-    return this.getCanonicalCell({
-      x: Math.floor(point.lat / this.tileWidth),
-      y: Math.floor(point.lng / this.tileWidth),
-    });
-  }
-
-  getCellCache(cell: Cell): Cache {
-    return this.knownCache.get([cell.x, cell.y].toString())!;
-  }
-
-  getCellDiv(cell: Cell): HTMLDivElement {
-    return this.knownDiv.get([cell.x, cell.y].toString())!;
+  getCacheFromCell(cell: Cell): Cache {
+    return this.currentlyVisibleCaches.get([cell.x, cell.y].toString())!;
   }
 
   getCellBounds(cell: Cell): leaflet.LatLngBounds {
-    return leaflet.latLngBounds(
-      leaflet.latLng(cell.x, cell.y),
-      leaflet.latLng(cell.x + this.tileWidth, cell.y + this.tileWidth),
-    );
+    const { x, y } = cell;
+    const topLeft = {
+      lat: x * this.tileWidth - this.halfTileWidth,
+      long: y * this.tileWidth + this.halfTileWidth,
+    };
+    const bottomRight = {
+      lat: (x * this.tileWidth) + this.halfTileWidth,
+      long: (y * this.tileWidth) - this.halfTileWidth,
+    };
+    return leaflet.latLngBounds([topLeft.lat, topLeft.long], [
+      bottomRight.lat,
+      bottomRight.long,
+    ]);
+  }
+
+  getCellAtPoint(location: Cell): Cell {
+    const i = Math.floor(location.x / this.tileWidth);
+    const j = Math.floor(location.y / this.tileWidth);
+    return this.getCanonicalCell({ x: i, y: j });
   }
 
   getCellsNearPoint(point: leaflet.LatLng): Cell[] {
     const resultCells: Cell[] = [];
+    const trueCell = this.getCellAtPoint({ x: point.lat, y: point.lng });
+    console.log(trueCell);
+    console.log(point);
 
     for (
       let dx = -this.tileVisibilityRadius;
@@ -93,15 +159,32 @@ export class Board {
         dy <= this.tileVisibilityRadius;
         dy++
       ) {
-        resultCells.push(
-          this.getCanonicalCell({
-            x: point.lat + dx * this.tileWidth,
-            y: point.lng + dy * this.tileWidth,
-          }),
-        );
+        const lat = trueCell.x + dx;
+        const lang = trueCell.y + dy;
+        if (
+          luck([lat, lang, "https://github.com/AKris0090/Orchid"].toString()) <
+            this.cacheSpawnProbability
+        ) {
+          const cannonCell = this.getCanonicalCell({ x: lat, y: lang });
+          resultCells.push(cannonCell);
+          const key = [cannonCell.x, cannonCell.y].toString();
+          const currentCache = this.generateCache(cannonCell);
+          this.currentlyVisibleCaches.set(key, currentCache);
+        }
       }
     }
 
     return resultCells;
+  }
+
+  getVisibleCaches(): Cache[] {
+    return Array.from(this.currentlyVisibleCaches.values());
+  }
+
+  clearVisibleCaches() {
+    this.currentlyVisibleCaches.forEach((val, key) => {
+      this.knownCaches.set(key, val.toMomento());
+    });
+    this.currentlyVisibleCaches.clear();
   }
 }

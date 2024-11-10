@@ -2,7 +2,6 @@ import leaflet from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./style.css";
 import "./leafletWorkaround.ts";
-import luck from "./luck.ts";
 import { Board, Cache, Cell, Coin } from "./board.ts";
 
 const playerCoins: Coin[] = [];
@@ -12,11 +11,40 @@ const OAKES_CLASSROOM_POSITION = leaflet.latLng(
   -122.06277128548504,
 );
 const ZOOM_LEVEL = 19;
-const TILE_RADIUS = 10;
+const TILE_RADIUS = 8;
 const TILE_DEGREES = 1e-4;
 const CACHE_SPAWN_PROBABILITY = 0.1;
+const MAX_COINS_PER_CACHE = 5;
 
-const board = new Board(TILE_DEGREES, TILE_RADIUS);
+const board = new Board(
+  TILE_DEGREES,
+  TILE_RADIUS,
+  CACHE_SPAWN_PROBABILITY,
+  MAX_COINS_PER_CACHE,
+);
+const bus = new EventTarget();
+
+function notify(name: string) {
+  bus.dispatchEvent(new Event(name));
+}
+
+function redrawMap() {
+  map.eachLayer((layer: leaflet.TileLayer) => {
+    if (!(layer instanceof leaflet.TileLayer)) {
+      map.removeLayer(layer);
+    }
+  });
+  board.clearVisibleCaches();
+
+  playerMarker.addTo(map);
+  const visibleCells = board.getCellsNearPoint(playerMarker.getLatLng());
+  for (let i = 0; i < visibleCells.length; i++) {
+    const cell = visibleCells[i];
+    const cache = board.getCacheFromCell(cell);
+    drawCache(cache, cell);
+  }
+}
+bus.addEventListener("playerMoved", redrawMap);
 
 const map = leaflet.map(document.getElementById("map")!, {
   center: OAKES_CLASSROOM_POSITION,
@@ -42,7 +70,7 @@ playerMarker.addTo(map);
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "No coins yet...";
 
-function updateCellAndStatus(cache: Cache, popupDiv: HTMLDivElement) {
+function updateCacheStatus(cache: Cache, popupDiv: HTMLDivElement) {
   const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
   popupText!.innerHTML = "";
   for (let i = 0; i < cache.coins.length; i++) {
@@ -60,7 +88,7 @@ function collectCoinFromCell(cache: Cache, popupDiv: HTMLDivElement) {
   if (cache.coins.length > 0) {
     const currentCoin = cache.coins.pop()!;
     playerCoins.push(currentCoin);
-    updateCellAndStatus(cache, popupDiv);
+    updateCacheStatus(cache, popupDiv);
   }
 }
 
@@ -68,17 +96,16 @@ function depositCoinToCell(cache: Cache, popupDiv: HTMLDivElement) {
   if (playerCoins.length > 0) {
     const currentCoin = playerCoins.pop()!;
     cache.coins.push(currentCoin);
-    updateCellAndStatus(cache, popupDiv);
+    updateCacheStatus(cache, popupDiv);
   }
 }
 
-function spawnCache(cell: Cell) {
+function drawCache(newCache: Cache, cell: Cell) {
   const rect = leaflet.rectangle(board.getCellBounds(cell));
   rect.addTo(map);
 
   rect.bindPopup(() => {
-    const popupDiv = board.getCellDiv(cell);
-    const cache = board.getCellCache(cell);
+    const popupDiv = document.createElement("div");
     popupDiv!.innerHTML = `
                 <div>There is a cache here at (${
       cell.x.toFixed(
@@ -90,8 +117,8 @@ function spawnCache(cell: Cell) {
       )
     }). It has coins: <span id='value'></span></div>`;
     const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
-    for (let i = 0; i < cache.coins.length; i++) {
-      popupText!.innerHTML += cache.coins[i].toString();
+    for (let i = 0; i < newCache.coins.length; i++) {
+      popupText!.innerHTML += newCache.coins[i].toString();
     }
     const getButton = document.createElement("button");
     getButton.innerText = "Collect coin";
@@ -100,17 +127,42 @@ function spawnCache(cell: Cell) {
     putButton.innerText = "Deposit coin";
     popupDiv!.appendChild(putButton);
     getButton.addEventListener("click", () => {
-      collectCoinFromCell(cache, popupDiv);
+      collectCoinFromCell(newCache, popupDiv);
     });
     putButton.addEventListener("click", () => {
-      depositCoinToCell(cache, popupDiv);
+      depositCoinToCell(newCache, popupDiv);
     });
     return popupDiv;
   });
 }
 
-board.getCellsNearPoint(playerMarker.getLatLng()).forEach((cell) => {
-  if (luck([cell.x, cell.y].toString()) < CACHE_SPAWN_PROBABILITY) {
-    spawnCache(cell);
-  }
+function movePlayerLatLang(lat: number, lng: number) {
+  const currentPos = playerMarker.getLatLng();
+  playerMarker.setLatLng(
+    leaflet.latLng(currentPos.lat + lat, currentPos.lng + lng),
+  );
+  notify("playerMoved");
+}
+
+const northButton = document.querySelector<HTMLButtonElement>("#north");
+const southButton = document.querySelector<HTMLButtonElement>("#south");
+const westButton = document.querySelector<HTMLButtonElement>("#west");
+const eastButton = document.querySelector<HTMLButtonElement>("#east");
+
+northButton!.addEventListener("click", () => {
+  movePlayerLatLang(TILE_DEGREES, 0);
 });
+
+southButton!.addEventListener("click", () => {
+  movePlayerLatLang(-TILE_DEGREES, 0);
+});
+
+westButton!.addEventListener("click", () => {
+  movePlayerLatLang(0, -TILE_DEGREES);
+});
+
+eastButton!.addEventListener("click", () => {
+  movePlayerLatLang(0, TILE_DEGREES);
+});
+
+redrawMap();
