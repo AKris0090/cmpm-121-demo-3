@@ -1,11 +1,23 @@
 import leaflet from "leaflet";
 import luck from "./luck.ts";
 
+export interface Cell {
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface Coin {
   cell: Cell;
   serial: number;
 
   toString(): void;
+}
+
+export interface Cache {
+  coins: Coin[];
+
+  toMomento(): string;
+  fromMomento(momento: string): void;
 }
 
 export function createCoin(cell: Cell, serial: number): Coin {
@@ -14,19 +26,14 @@ export function createCoin(cell: Cell, serial: number): Coin {
     serial,
     toString() {
       return `<pre>${cell.x.toFixed(4)}:${
-        cell.y.toFixed(4)
+        cell.y.toFixed(
+          4,
+        )
       }, serial:${serial}</pre>`;
     },
   };
 
   return newCoin;
-}
-
-export interface Cache {
-  coins: Coin[];
-
-  toMomento(): string;
-  fromMomento(momento: string): void;
 }
 
 export function newCache(cell: Cell, maxCoins: number): Cache {
@@ -52,17 +59,11 @@ export function newCache(cell: Cell, maxCoins: number): Cache {
   const numCoins =
     luck([cell.x, cell.y, "https://github.com/AKris0090/Orchid"].toString()) *
     maxCoins;
-  console.log(numCoins, maxCoins);
   for (let i = 0; i < numCoins; i++) {
     newCache.coins.push(createCoin(cell, i));
   }
 
   return newCache;
-}
-
-export interface Cell {
-  readonly x: number;
-  readonly y: number;
 }
 
 export class Board {
@@ -92,14 +93,20 @@ export class Board {
     this.currentlyVisibleCaches = new Map();
   }
 
+  private cellToKey(cell: Cell): string {
+    return [cell.x, cell.y].toString();
+  }
+
   private generateCache(cell: Cell): Cache {
-    const { x, y } = cell;
-    const key = [x, y].toString();
+    const key = this.cellToKey(cell);
     if (!this.knownCaches.has(key)) {
-      const currentCache = newCache({
-        x: cell.x * this.tileWidth,
-        y: cell.y * this.tileWidth,
-      }, this.maxCoins);
+      const currentCache = newCache(
+        {
+          x: cell.x * this.tileWidth,
+          y: cell.y * this.tileWidth,
+        },
+        this.maxCoins,
+      );
       this.knownCaches.set(key, currentCache.toMomento());
       return currentCache;
     }
@@ -110,7 +117,7 @@ export class Board {
 
   private getCanonicalCell(cell: Cell): Cell {
     const { x, y } = cell;
-    const key = [x, y].toString();
+    const key = this.cellToKey(cell);
     if (!this.knownCells.has(key)) {
       this.knownCells.set(key, { x, y });
     }
@@ -118,7 +125,7 @@ export class Board {
   }
 
   getCacheFromCell(cell: Cell): Cache {
-    return this.currentlyVisibleCaches.get([cell.x, cell.y].toString())!;
+    return this.currentlyVisibleCaches.get(this.cellToKey(cell))!;
   }
 
   getCellBounds(cell: Cell): leaflet.LatLngBounds {
@@ -128,13 +135,13 @@ export class Board {
       long: y * this.tileWidth + this.halfTileWidth,
     };
     const bottomRight = {
-      lat: (x * this.tileWidth) + this.halfTileWidth,
-      long: (y * this.tileWidth) - this.halfTileWidth,
+      lat: x * this.tileWidth + this.halfTileWidth,
+      long: y * this.tileWidth - this.halfTileWidth,
     };
-    return leaflet.latLngBounds([topLeft.lat, topLeft.long], [
-      bottomRight.lat,
-      bottomRight.long,
-    ]);
+    return leaflet.latLngBounds(
+      [topLeft.lat, topLeft.long],
+      [bottomRight.lat, bottomRight.long],
+    );
   }
 
   getCellAtPoint(location: Cell): Cell {
@@ -146,8 +153,6 @@ export class Board {
   getCellsNearPoint(point: leaflet.LatLng): Cell[] {
     const resultCells: Cell[] = [];
     const trueCell = this.getCellAtPoint({ x: point.lat, y: point.lng });
-    console.log(trueCell);
-    console.log(point);
 
     for (
       let dx = -this.tileVisibilityRadius;
@@ -165,10 +170,10 @@ export class Board {
           luck([lat, lang, "https://github.com/AKris0090/Orchid"].toString()) <
             this.cacheSpawnProbability
         ) {
-          const cannonCell = this.getCanonicalCell({ x: lat, y: lang });
-          resultCells.push(cannonCell);
-          const key = [cannonCell.x, cannonCell.y].toString();
-          const currentCache = this.generateCache(cannonCell);
+          const cannonicalCell = this.getCanonicalCell({ x: lat, y: lang });
+          resultCells.push(cannonicalCell);
+          const key = this.cellToKey(cannonicalCell);
+          const currentCache = this.generateCache(cannonicalCell);
           this.currentlyVisibleCaches.set(key, currentCache);
         }
       }
@@ -177,14 +182,14 @@ export class Board {
     return resultCells;
   }
 
-  getVisibleCaches(): Cache[] {
-    return Array.from(this.currentlyVisibleCaches.values());
-  }
-
   clearVisibleCaches() {
     this.currentlyVisibleCaches.forEach((val, key) => {
       this.knownCaches.set(key, val.toMomento());
     });
     this.currentlyVisibleCaches.clear();
+  }
+
+  getCacheRectangle(cell: Cell): leaflet.Rectangle {
+    return leaflet.rectangle(this.getCellBounds(cell));
   }
 }

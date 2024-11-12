@@ -39,9 +39,8 @@ function redrawMap() {
   playerMarker.addTo(map);
   const visibleCells = board.getCellsNearPoint(playerMarker.getLatLng());
   for (let i = 0; i < visibleCells.length; i++) {
-    const cell = visibleCells[i];
-    const cache = board.getCacheFromCell(cell);
-    drawCache(cache, cell);
+    const cache = board.getCacheFromCell(visibleCells[i]);
+    drawCache(cache, visibleCells[i]);
   }
 }
 bus.addEventListener("playerMoved", redrawMap);
@@ -73,66 +72,74 @@ statusPanel.innerHTML = "No coins yet...";
 function updateCacheStatus(cache: Cache, popupDiv: HTMLDivElement) {
   const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
   popupText!.innerHTML = "";
-  for (let i = 0; i < cache.coins.length; i++) {
-    popupText!.innerHTML += cache.coins[i].toString();
-  }
+  popupText!.innerHTML = cache.coins.map((coin) => coin.toString()).join("");
   statusPanel!.innerHTML =
     `<pre>You have ${playerCoins.length} coins: \n</pre>`;
-  for (let i = 0; i < playerCoins.length; i++) {
-    const coin = playerCoins[i];
-    statusPanel!.innerHTML! += coin.toString();
+  statusPanel!.innerHTML += playerCoins.map((coin) => coin.toString()).join("");
+}
+
+function transferCoin(
+  source: Coin[],
+  target: Coin[],
+  cache: Cache,
+  popupDiv: HTMLDivElement,
+) {
+  if (source.length > 0) {
+    const coin = source.pop()!;
+    target.push(coin);
+    updateCacheStatus(cache, popupDiv);
   }
 }
 
 function collectCoinFromCell(cache: Cache, popupDiv: HTMLDivElement) {
-  if (cache.coins.length > 0) {
-    const currentCoin = cache.coins.pop()!;
-    playerCoins.push(currentCoin);
-    updateCacheStatus(cache, popupDiv);
-  }
+  transferCoin(cache.coins, playerCoins, cache, popupDiv);
 }
 
 function depositCoinToCell(cache: Cache, popupDiv: HTMLDivElement) {
-  if (playerCoins.length > 0) {
-    const currentCoin = playerCoins.pop()!;
-    cache.coins.push(currentCoin);
-    updateCacheStatus(cache, popupDiv);
+  transferCoin(playerCoins, cache.coins, cache, popupDiv);
+}
+
+function createCachePopup(cache: Cache, cell: Cell): HTMLDivElement {
+  const popupDiv = document.createElement("div");
+  popupDiv!.innerHTML = `
+              <div>There is a cache here at (${
+    cell.x.toFixed(
+      4,
+    )
+  },${
+    cell.y.toFixed(
+      4,
+    )
+  }). It has coins: <span id='value'></span></div>`;
+
+  const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
+  for (let i = 0; i < cache.coins.length; i++) {
+    popupText!.innerHTML += cache.coins[i].toString();
   }
+
+  const getButton = document.createElement("button");
+  getButton.innerText = "Collect coin";
+  getButton.addEventListener("click", () => {
+    collectCoinFromCell(cache, popupDiv);
+  });
+
+  const putButton = document.createElement("button");
+  putButton.innerText = "Deposit coin";
+  putButton.addEventListener("click", () => {
+    depositCoinToCell(cache, popupDiv);
+  });
+
+  popupDiv!.appendChild(getButton);
+  popupDiv!.appendChild(putButton);
+  return popupDiv;
 }
 
 function drawCache(newCache: Cache, cell: Cell) {
-  const rect = leaflet.rectangle(board.getCellBounds(cell));
+  const rect = board.getCacheRectangle(cell);
   rect.addTo(map);
 
   rect.bindPopup(() => {
-    const popupDiv = document.createElement("div");
-    popupDiv!.innerHTML = `
-                <div>There is a cache here at (${
-      cell.x.toFixed(
-        4,
-      )
-    },${
-      cell.y.toFixed(
-        4,
-      )
-    }). It has coins: <span id='value'></span></div>`;
-    const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
-    for (let i = 0; i < newCache.coins.length; i++) {
-      popupText!.innerHTML += newCache.coins[i].toString();
-    }
-    const getButton = document.createElement("button");
-    getButton.innerText = "Collect coin";
-    popupDiv!.appendChild(getButton);
-    const putButton = document.createElement("button");
-    putButton.innerText = "Deposit coin";
-    popupDiv!.appendChild(putButton);
-    getButton.addEventListener("click", () => {
-      collectCoinFromCell(newCache, popupDiv);
-    });
-    putButton.addEventListener("click", () => {
-      depositCoinToCell(newCache, popupDiv);
-    });
-    return popupDiv;
+    return createCachePopup(newCache, cell);
   });
 }
 
@@ -144,25 +151,17 @@ function movePlayerLatLang(lat: number, lng: number) {
   notify("playerMoved");
 }
 
-const northButton = document.querySelector<HTMLButtonElement>("#north");
-const southButton = document.querySelector<HTMLButtonElement>("#south");
-const westButton = document.querySelector<HTMLButtonElement>("#west");
-const eastButton = document.querySelector<HTMLButtonElement>("#east");
-
-northButton!.addEventListener("click", () => {
-  movePlayerLatLang(TILE_DEGREES, 0);
-});
-
-southButton!.addEventListener("click", () => {
-  movePlayerLatLang(-TILE_DEGREES, 0);
-});
-
-westButton!.addEventListener("click", () => {
-  movePlayerLatLang(0, -TILE_DEGREES);
-});
-
-eastButton!.addEventListener("click", () => {
-  movePlayerLatLang(0, TILE_DEGREES);
-});
-
+function initializeMovementButtons() {
+  [
+    { id: "north", lat: TILE_DEGREES, lng: 0 },
+    { id: "south", lat: -TILE_DEGREES, lng: 0 },
+    { id: "west", lat: 0, lng: -TILE_DEGREES },
+    { id: "east", lat: 0, lng: TILE_DEGREES },
+  ].forEach(({ id, lat, lng }) => {
+    document
+      .getElementById(id)!
+      .addEventListener("click", () => movePlayerLatLang(lat, lng));
+  });
+}
+initializeMovementButtons();
 redrawMap();
