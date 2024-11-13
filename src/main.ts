@@ -165,3 +165,19 @@ function initializeMovementButtons() {
 }
 initializeMovementButtons();
 redrawMap();
+
+function onLocationFound(e: leaflet.LocationEvent) {
+  playerMarker.setLatLng(e.latlng);
+  redrawMap();
+}
+
+function onLocationError(e: leaflet.LocationError) {
+  alert(e.message);
+}
+
+map.on("locationfound", onLocationFound);
+map.on("locationerror", onLocationError);
+
+document.getElementById("sensor")!.addEventListener("click", () => {
+  map.locate({ setView: true, maxZoom: ZOOM_LEVEL });
+});
