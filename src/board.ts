@@ -1,5 +1,6 @@
 import leaflet from "leaflet";
 import luck from "./luck.ts";
+import { centerOnPoint } from "./main.ts";
 
 export interface Cell {
   readonly x: number;
@@ -9,8 +10,9 @@ export interface Cell {
 export interface Coin {
   cell: Cell;
   serial: number;
+  button: HTMLButtonElement;
 
-  toString(): void;
+  toString(): string;
 }
 
 export interface Cache {
@@ -24,15 +26,16 @@ export function createCoin(cell: Cell, serial: number): Coin {
   const newCoin: Coin = {
     cell,
     serial,
+    button: document.createElement("button"),
     toString() {
-      return `<pre>${cell.x.toFixed(4)}:${
-        cell.y.toFixed(
-          4,
-        )
-      }, serial:${serial}</pre>`;
+      return `\n${cell.x.toFixed(4)}:${cell.y.toFixed(4)}, serial:${serial} `;
     },
   };
 
+  newCoin.button.innerText = "Locate Home";
+  newCoin.button.onclick = () => {
+    centerOnPoint(newCoin.cell);
+  };
   return newCoin;
 }
 
@@ -150,6 +153,13 @@ export class Board {
     return this.getCanonicalCell({ x: i, y: j });
   }
 
+  getPointAtCell(location: Cell): leaflet.latLng {
+    return {
+      lat: location.x * this.tileWidth + this.tileWidth / 2,
+      long: location.y * this.tileWidth + this.tileWidth / 2,
+    };
+  }
+
   getCellsNearPoint(point: leaflet.LatLng): Cell[] {
     const resultCells: Cell[] = [];
     const trueCell = this.getCellAtPoint({ x: point.lat, y: point.lng });
@@ -178,18 +188,47 @@ export class Board {
         }
       }
     }
+    this.saveVisibleCaches();
 
     return resultCells;
   }
 
-  clearVisibleCaches() {
+  saveVisibleCaches() {
     this.currentlyVisibleCaches.forEach((val, key) => {
       this.knownCaches.set(key, val.toMomento());
     });
+  }
+
+  clearVisibleCaches() {
+    this.saveVisibleCaches();
     this.currentlyVisibleCaches.clear();
   }
 
   getCacheRectangle(cell: Cell): leaflet.Rectangle {
     return leaflet.rectangle(this.getCellBounds(cell));
+  }
+
+  saveCache(cell: Cell, cache: Cache) {
+    this.knownCaches.set(this.cellToKey(cell), cache.toMomento());
+  }
+
+  setKnownCaches(cacheJSON: string) {
+    const parsedCaches = JSON.parse(cacheJSON);
+    for (let i = 0; i < parsedCaches.caches.length; i++) {
+      this.knownCaches.set(parsedCaches.cacheKeys[i], parsedCaches.caches[i]);
+    }
+  }
+
+  saveJSON(): string {
+    return JSON.stringify({
+      cacheKeys: Array.from(this.knownCaches.keys()),
+      caches: Array.from(this.knownCaches.values()),
+    });
+  }
+
+  clearMemory() {
+    this.knownCaches.clear();
+    this.knownCells.clear();
+    this.currentlyVisibleCaches.clear();
   }
 }

@@ -2,7 +2,7 @@ import leaflet from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./style.css";
 import "./leafletWorkaround.ts";
-import { Board, Cache, Cell, Coin } from "./board.ts";
+import { Board, Cache, Cell, Coin, createCoin } from "./board.ts";
 
 const playerCoins: Coin[] = [];
 
@@ -29,6 +29,8 @@ function notify(name: string) {
 }
 
 function redrawMap() {
+  polyline.addLatLng(playerMarker.getLatLng());
+  if (!map) return;
   map.eachLayer((layer: leaflet.TileLayer) => {
     if (!(layer instanceof leaflet.TileLayer)) {
       map.removeLayer(layer);
@@ -37,6 +39,7 @@ function redrawMap() {
   board.clearVisibleCaches();
 
   playerMarker.addTo(map);
+  polyline.addTo(map);
   const visibleCells = board.getCellsNearPoint(playerMarker.getLatLng());
   for (let i = 0; i < visibleCells.length; i++) {
     const cache = board.getCacheFromCell(visibleCells[i]);
@@ -45,37 +48,50 @@ function redrawMap() {
 }
 bus.addEventListener("playerMoved", redrawMap);
 
-const map = leaflet.map(document.getElementById("map")!, {
-  center: OAKES_CLASSROOM_POSITION,
-  zoom: ZOOM_LEVEL,
-  minZoom: ZOOM_LEVEL,
-  maxZoom: ZOOM_LEVEL,
-  zoomControl: false,
-  scrollWheelZoom: false,
-});
+let map: leaflet.Map;
 
-leaflet
-  .tileLayer("https://{s}.tile.thunderforest.com/pioneer/{z}/{x}/{y}.png", {
-    maxZoom: ZOOM_LEVEL,
-    attribution:
-      '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  })
-  .addTo(map);
-
-const playerMarker = leaflet.marker(OAKES_CLASSROOM_POSITION);
-playerMarker.bindTooltip(`Your position`);
-playerMarker.addTo(map);
+let playerMarker: leaflet.Marker;
 
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "No coins yet...";
 
+function updateStatusPanel() {
+  statusPanel!.innerText = `You have ${playerCoins.length} coins:`;
+
+  for (let i = 0; i < playerCoins.length; i++) {
+    const coin = playerCoins[i];
+
+    const coinInfo = document.createElement("div");
+    coinInfo.innerText += coin.toString();
+    statusPanel!.appendChild(coinInfo);
+
+    createAddButton(coin.cell, statusPanel);
+  }
+}
+
+function createAddButton(cell: Cell, panel: HTMLDivElement) {
+  const newButton = document.createElement("button");
+  newButton.innerText = "Locate Home";
+
+  newButton.addEventListener("click", () => {
+    centerOnPoint(cell);
+  });
+
+  panel.appendChild(newButton);
+}
+
 function updateCacheStatus(cache: Cache, popupDiv: HTMLDivElement) {
-  const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
-  popupText!.innerHTML = "";
-  popupText!.innerHTML = cache.coins.map((coin) => coin.toString()).join("");
-  statusPanel!.innerHTML =
-    `<pre>You have ${playerCoins.length} coins: \n</pre>`;
-  statusPanel!.innerHTML += playerCoins.map((coin) => coin.toString()).join("");
+  popupDiv!.innerText = ``;
+  for (let i = 0; i < cache.coins.length; i++) {
+    const coin = cache.coins[i];
+
+    const coinInfo = document.createElement("div");
+    coinInfo.innerText += coin.toString();
+    popupDiv!.appendChild(coinInfo);
+
+    createAddButton(coin.cell, coinInfo);
+  }
+  updateStatusPanel();
 }
 
 function transferCoin(
@@ -91,12 +107,18 @@ function transferCoin(
   }
 }
 
-function collectCoinFromCell(cache: Cache, popupDiv: HTMLDivElement) {
+function collectCoinFromCell(
+  cache: Cache,
+  cell: Cell,
+  popupDiv: HTMLDivElement,
+) {
   transferCoin(cache.coins, playerCoins, cache, popupDiv);
+  board.saveCache(cell, cache);
 }
 
-function depositCoinToCell(cache: Cache, popupDiv: HTMLDivElement) {
+function depositCoinToCell(cache: Cache, cell: Cell, popupDiv: HTMLDivElement) {
   transferCoin(playerCoins, cache.coins, cache, popupDiv);
+  board.saveCache(cell, cache);
 }
 
 function createCachePopup(cache: Cache, cell: Cell): HTMLDivElement {
@@ -106,27 +128,30 @@ function createCachePopup(cache: Cache, cell: Cell): HTMLDivElement {
     cell.x.toFixed(
       4,
     )
-  },${
-    cell.y.toFixed(
-      4,
-    )
-  }). It has coins: <span id='value'></span></div>`;
+  },${cell.y.toFixed(4)}). It has coins: </div>`;
 
-  const popupText = popupDiv.querySelector<HTMLSpanElement>("#value");
+  const popupText = document.createElement("div");
   for (let i = 0; i < cache.coins.length; i++) {
-    popupText!.innerHTML += cache.coins[i].toString();
+    const coin = cache.coins[i];
+
+    const coinInfo = document.createElement("div");
+    coinInfo.innerText += coin.toString();
+    popupText!.appendChild(coinInfo);
+
+    createAddButton(coin.cell, coinInfo);
   }
+  popupDiv!.appendChild(popupText);
 
   const getButton = document.createElement("button");
   getButton.innerText = "Collect coin";
   getButton.addEventListener("click", () => {
-    collectCoinFromCell(cache, popupDiv);
+    collectCoinFromCell(cache, cell, popupText);
   });
 
   const putButton = document.createElement("button");
   putButton.innerText = "Deposit coin";
   putButton.addEventListener("click", () => {
-    depositCoinToCell(cache, popupDiv);
+    depositCoinToCell(cache, cell, popupText);
   });
 
   popupDiv!.appendChild(getButton);
@@ -163,21 +188,173 @@ function initializeMovementButtons() {
       .addEventListener("click", () => movePlayerLatLang(lat, lng));
   });
 }
-initializeMovementButtons();
-redrawMap();
+
+document.getElementById("resetPosition")!.addEventListener("click", () => {
+  map.setView(playerMarker.getLatLng(), ZOOM_LEVEL);
+});
+
+function askQuestion(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const answer = globalThis.confirm(
+      "Are you sure you want to reset the game?",
+    );
+    resolve(answer);
+  });
+}
+
+function clearHistory() {
+  playerMarker.setLatLng(OAKES_CLASSROOM_POSITION);
+  map.setView(OAKES_CLASSROOM_POSITION, ZOOM_LEVEL);
+  localStorage.removeItem("playerCaches");
+  localStorage.removeItem("playerPositions");
+  localStorage.removeItem("currentPosition");
+  localStorage.removeItem("playerCoins");
+}
+
+export function centerOnPoint(location: Cell) {
+  map.setView(leaflet.latLng([location.x, location.y]), ZOOM_LEVEL);
+  const currentMarker = leaflet.marker(
+    leaflet.latLng([location.x, location.y]),
+  );
+  currentMarker.bindTooltip(
+    `Coin collected from: ${location.x.toFixed(4)}, ${location.y.toFixed(4)}`,
+  );
+  currentMarker.addTo(map);
+}
+
+document.getElementById("reset")!.addEventListener("click", () => {
+  askQuestion().then((response) => {
+    if (response) {
+      clearHistory();
+      playerCoins.splice(0, playerCoins.length);
+      updateStatusPanel();
+      board.clearMemory();
+      redrawMap();
+    }
+  });
+});
+
+const playerPositions: Cell[] = [];
+
+const polyline = leaflet.polyline([], { color: "red" });
 
 function onLocationFound(e: leaflet.LocationEvent) {
-  playerMarker.setLatLng(e.latlng);
-  redrawMap();
+  const currentCell = board.getCellAtPoint({
+    x: e.latlng.lat,
+    y: e.latlng.lng,
+  });
+  if (!(currentCell === playerPositions[playerPositions.length - 1])) {
+    playerMarker.setLatLng(e.latlng);
+    playerPositions.push(e.latlng);
+    polyline.addLatLng(e.latlng);
+    redrawMap();
+  }
 }
 
 function onLocationError(e: leaflet.LocationError) {
   alert(e.message);
 }
 
-map.on("locationfound", onLocationFound);
-map.on("locationerror", onLocationError);
-
 document.getElementById("sensor")!.addEventListener("click", () => {
   map.locate({ setView: true, maxZoom: ZOOM_LEVEL });
 });
+
+globalThis.onload = () => {
+  try {
+    const savedCache = localStorage.getItem("playerCaches");
+    const savedPositions = localStorage.getItem("playerPositions");
+    const currentPos = localStorage.getItem("currentPosition");
+    const savedCoins = localStorage.getItem("playerCoins");
+
+    if (savedCoins) {
+      const allCoins = JSON.parse(savedCoins);
+      for (let i = 0; i < allCoins.length; i++) {
+        playerCoins.push(createCoin(allCoins[i].cell, allCoins[i].serial));
+      }
+      updateStatusPanel();
+    }
+
+    if (savedPositions) {
+      const positions = JSON.parse(savedPositions);
+      const latLng = leaflet.latLng(positions.lat, positions.lng);
+      playerPositions.push(latLng);
+      map = leaflet.map(document.getElementById("map")!, {
+        center: latLng,
+        zoom: ZOOM_LEVEL,
+        minZoom: ZOOM_LEVEL,
+        maxZoom: ZOOM_LEVEL,
+        zoomControl: false,
+        scrollWheelZoom: false,
+      });
+    } else {
+      map = leaflet.map(document.getElementById("map")!, {
+        center: OAKES_CLASSROOM_POSITION,
+        zoom: ZOOM_LEVEL,
+        minZoom: ZOOM_LEVEL,
+        maxZoom: ZOOM_LEVEL,
+        zoomControl: false,
+        scrollWheelZoom: false,
+      });
+    }
+
+    playerMarker = leaflet.marker(OAKES_CLASSROOM_POSITION);
+
+    if (savedCache && currentPos) {
+      board.setKnownCaches(savedCache);
+      const parsedLocation = JSON.parse(currentPos);
+      playerMarker.setLatLng(
+        leaflet.latLng(parsedLocation.lat, parsedLocation.lng),
+      );
+      if (parsedLocation && parsedLocation.lat && parsedLocation.lng) {
+        map.setView([parsedLocation.lat, parsedLocation.lng], ZOOM_LEVEL);
+      } else {
+        console.warn("Parsed location data is incomplete:", parsedLocation);
+      }
+    }
+
+    leaflet
+      .tileLayer("https://{s}.tile.thunderforest.com/pioneer/{z}/{x}/{y}.png", {
+        maxZoom: ZOOM_LEVEL,
+        attribution:
+          '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      })
+      .addTo(map);
+
+    playerMarker.bindTooltip(`Your position`);
+    playerMarker.addTo(map);
+
+    polyline.addTo(map);
+
+    map.on("locationfound", onLocationFound);
+    map.on("locationerror", onLocationError);
+
+    redrawMap(); // Call redrawMap after map is fully initialized
+  } catch (error) {
+    console.error("Error loading data on load:", error);
+  }
+};
+
+globalThis.onbeforeunload = () => {
+  try {
+    // Save player positions, known caches, and current position to localStorage
+    localStorage.setItem("playerPositions", JSON.stringify(playerPositions));
+    localStorage.setItem("playerCaches", board.saveJSON());
+    localStorage.setItem(
+      "currentPosition",
+      JSON.stringify(playerMarker.getLatLng()),
+    );
+    localStorage.setItem(
+      "playerCoins",
+      JSON.stringify(
+        playerCoins.map((coin) => ({
+          cell: coin.cell,
+          serial: coin.serial,
+        })),
+      ),
+    );
+  } catch (error) {
+    console.error("Error saving data on unload:", error);
+  }
+};
+
+initializeMovementButtons();
