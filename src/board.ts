@@ -1,73 +1,7 @@
 import leaflet from "leaflet";
 import luck from "./luck.ts";
-import { centerOnPoint } from "./main.ts";
-
-export interface Cell {
-  readonly x: number;
-  readonly y: number;
-}
-
-export interface Coin {
-  cell: Cell;
-  serial: number;
-  button: HTMLButtonElement;
-
-  toString(): string;
-}
-
-export interface Cache {
-  coins: Coin[];
-
-  toMomento(): string;
-  fromMomento(momento: string): void;
-}
-
-export function createCoin(cell: Cell, serial: number): Coin {
-  const newCoin: Coin = {
-    cell,
-    serial,
-    button: document.createElement("button"),
-    toString() {
-      return `\n${cell.x.toFixed(4)}:${cell.y.toFixed(4)}, serial:${serial} `;
-    },
-  };
-
-  newCoin.button.innerText = "Locate Home";
-  newCoin.button.onclick = () => {
-    centerOnPoint(newCoin.cell);
-  };
-  return newCoin;
-}
-
-export function newCache(cell: Cell, maxCoins: number): Cache {
-  const newCache: Cache = {
-    coins: [],
-
-    toMomento() {
-      return JSON.stringify({
-        coins: this.coins,
-      });
-    },
-    fromMomento(momento: string) {
-      this.coins = [];
-      const parsed = JSON.parse(momento);
-      for (let i = 0; i < parsed.coins.length; i++) {
-        const parsedCoin = parsed.coins[i];
-        const newCoin: Coin = createCoin(parsedCoin.cell, parsedCoin.serial);
-        this.coins.push(newCoin);
-      }
-    },
-  };
-
-  const numCoins =
-    luck([cell.x, cell.y, "https://github.com/AKris0090/Orchid"].toString()) *
-    maxCoins;
-  for (let i = 0; i < numCoins; i++) {
-    newCache.coins.push(createCoin(cell, i));
-  }
-
-  return newCache;
-}
+import { MapAbstraction } from "./mapAbstraction.ts";
+import { Cache, Cell, newCache } from "./boardPieces.ts";
 
 export class Board {
   readonly tileWidth: number;
@@ -79,12 +13,14 @@ export class Board {
   private readonly knownCells: Map<string, Cell>;
   private readonly knownCaches: Map<string, string>;
   private readonly currentlyVisibleCaches: Map<string, Cache>;
+  statusPanel: HTMLDivElement;
 
   constructor(
     tileWidth: number,
     tileVisibilityRadius: number,
     cacheSpawnProbability: number,
     maxCoins: number,
+    statusPanel: HTMLDivElement,
   ) {
     this.tileWidth = tileWidth;
     this.tileVisibilityRadius = tileVisibilityRadius;
@@ -94,13 +30,14 @@ export class Board {
     this.knownCells = new Map();
     this.knownCaches = new Map();
     this.currentlyVisibleCaches = new Map();
+    this.statusPanel = statusPanel;
   }
 
   private cellToKey(cell: Cell): string {
     return [cell.x, cell.y].toString();
   }
 
-  private generateCache(cell: Cell): Cache {
+  private generateCache(cell: Cell, map: MapAbstraction): Cache {
     const key = this.cellToKey(cell);
     if (!this.knownCaches.has(key)) {
       const currentCache = newCache(
@@ -109,11 +46,12 @@ export class Board {
           y: cell.y * this.tileWidth,
         },
         this.maxCoins,
+        map,
       );
       this.knownCaches.set(key, currentCache.toMomento());
       return currentCache;
     }
-    const existingCache: Cache = newCache(cell, 0);
+    const existingCache: Cache = newCache(cell, 0, map);
     existingCache.fromMomento(this.knownCaches.get(key)!);
     return existingCache;
   }
@@ -160,7 +98,7 @@ export class Board {
     };
   }
 
-  getCellsNearPoint(point: leaflet.LatLng): Cell[] {
+  getCellsNearPoint(point: leaflet.LatLng, map: MapAbstraction): Cell[] {
     const resultCells: Cell[] = [];
     const trueCell = this.getCellAtPoint({ x: point.lat, y: point.lng });
 
@@ -183,7 +121,7 @@ export class Board {
           const cannonicalCell = this.getCanonicalCell({ x: lat, y: lang });
           resultCells.push(cannonicalCell);
           const key = this.cellToKey(cannonicalCell);
-          const currentCache = this.generateCache(cannonicalCell);
+          const currentCache = this.generateCache(cannonicalCell, map);
           this.currentlyVisibleCaches.set(key, currentCache);
         }
       }
@@ -191,6 +129,49 @@ export class Board {
     this.saveVisibleCaches();
 
     return resultCells;
+  }
+
+  createLocateButton(map: MapAbstraction, cell: Cell, panel: HTMLDivElement) {
+    const newButton = document.createElement("button");
+    newButton.innerText = "Locate Home";
+
+    newButton.addEventListener("click", () => {
+      const point: leaflet.latLng = leaflet.latLng(cell.x, cell.y);
+      map.centerOnPoint(point, true);
+    });
+
+    panel.appendChild(newButton);
+  }
+
+  updateStatusPanel(map: MapAbstraction) {
+    this.statusPanel!.innerText = `You have ${map.playerCoins.length} coins:`;
+
+    for (let i = 0; i < map.playerCoins.length; i++) {
+      const coin = map.playerCoins[i];
+
+      const coinInfo = document.createElement("div");
+      coinInfo.innerText += coin.toString();
+      this.statusPanel!.appendChild(coinInfo);
+
+      this.createLocateButton(map, coin.cell, coinInfo);
+    }
+  }
+
+  updateCacheStatus(
+    map: MapAbstraction,
+    cache: Cache,
+    popupDiv: HTMLDivElement,
+  ) {
+    popupDiv!.innerText = ``;
+    for (let i = 0; i < cache.coins.length; i++) {
+      const coin = cache.coins[i];
+
+      const coinInfo = document.createElement("div");
+      coinInfo.innerText += coin.toString();
+      popupDiv!.appendChild(coinInfo);
+
+      this.createLocateButton(map, coin.cell, coinInfo);
+    }
   }
 
   saveVisibleCaches() {
@@ -212,18 +193,25 @@ export class Board {
     this.knownCaches.set(this.cellToKey(cell), cache.toMomento());
   }
 
-  setKnownCaches(cacheJSON: string) {
-    const parsedCaches = JSON.parse(cacheJSON);
+  loadKnownCaches() {
+    const cacheJSON = localStorage.getItem("playerCaches");
+    if (!cacheJSON) {
+      return;
+    }
+    const parsedCaches = JSON.parse(cacheJSON!);
     for (let i = 0; i < parsedCaches.caches.length; i++) {
       this.knownCaches.set(parsedCaches.cacheKeys[i], parsedCaches.caches[i]);
     }
   }
 
-  saveJSON(): string {
-    return JSON.stringify({
-      cacheKeys: Array.from(this.knownCaches.keys()),
-      caches: Array.from(this.knownCaches.values()),
-    });
+  saveCaches(): void {
+    localStorage.setItem(
+      "playerCaches",
+      JSON.stringify({
+        cacheKeys: Array.from(this.knownCaches.keys()),
+        caches: Array.from(this.knownCaches.values()),
+      }),
+    );
   }
 
   clearMemory() {
