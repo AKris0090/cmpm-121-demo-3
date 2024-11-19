@@ -5,11 +5,12 @@ import "./leafletWorkaround.ts";
 import {
   newPolylineAbstraction,
   PolylineAbstraction,
-} from "./polylineAbstraction.ts";
-import { MapAbstraction, newMapAbstraction } from "./mapAbstraction.ts";
-import { Board } from "./board.ts";
-import { Cell, createCoin } from "./boardPieces.ts";
+} from "./PolyLineInterface.ts";
+import { MapAbstraction, newMapAbstraction } from "./MapInterface.ts";
+import { BoardInterface, newBoard } from "./BoardInterface.ts";
+import { Cell, createCoin } from "./Pieces.ts";
 
+// Constants
 const OAKES_CLASSROOM_POSITION = leaflet.latLng(
   36.98949379578401,
   -122.06277128548504,
@@ -20,8 +21,8 @@ const TILE_DEGREES = 1e-4;
 const CACHE_SPAWN_PROBABILITY = 0.1;
 const MAX_COINS_PER_CACHE = 5;
 
-let board: Board;
-
+// Global variables
+let board: BoardInterface;
 let previousPlayerPosition: Cell;
 let polylines: PolylineAbstraction;
 let mapAbstraction: MapAbstraction;
@@ -31,11 +32,16 @@ const bus = new EventTarget();
 function notify(name: string) {
   bus.dispatchEvent(new Event(name));
 }
+
 function redrawMap() {
   polylines.addPointToCurrentLine(mapAbstraction.playerMarker.getLatLng());
   mapAbstraction.redrawMap(board, polylines);
-  mapAbstraction.centerOnPoint(mapAbstraction.playerMarker.getLatLng(), false);
+  mapAbstraction.reCenterOnPoint(
+    mapAbstraction.playerMarker.getLatLng(),
+    false,
+  );
 }
+// Redraw map on player movement
 bus.addEventListener("redraw", redrawMap);
 
 // Player movement with arrow buttons
@@ -47,6 +53,7 @@ function movePlayerLatLang(lat: number, lng: number) {
   notify("redraw");
 }
 
+// Setup movement buttons
 function initializeMovementButtons() {
   [
     { id: "north", lat: TILE_DEGREES, lng: 0 },
@@ -70,6 +77,7 @@ function askQuestion(): Promise<boolean> {
   });
 }
 
+// onLocationFound is called when the app receives a location update from the device
 function onLocationFound(e: leaflet.LocationEvent) {
   const currentCell = board.getCellAtPoint({
     x: e.latlng.lat,
@@ -77,49 +85,65 @@ function onLocationFound(e: leaflet.LocationEvent) {
   });
   if (!(currentCell === previousPlayerPosition)) {
     mapAbstraction.setPlayerMarker(e.latlng);
-    mapAbstraction.centerOnPoint(e.latlng, false);
     previousPlayerPosition = currentCell;
     polylines.addPointToCurrentLine(e.latlng);
     notify("redraw");
   }
 }
 
+// onLocationError is called when the app receives an error from the device (e.g. location services are disabled)
 function onLocationError(e: leaflet.LocationError) {
   alert(e.message);
 }
 
+// Event listeners for buttons
+
+// Pressing the sensor button binds the locationfound and locationerror events to the map
 document.getElementById("sensor")!.addEventListener("click", () => {
-  mapAbstraction.centerGeoPosition();
+  mapAbstraction.leafMap.locate({ setView: true, maxZoom: ZOOM_LEVEL });
+  mapAbstraction.reCenterOnPoint(
+    mapAbstraction.playerMarker.getLatLng(),
+    false,
+  );
+  mapAbstraction.leafMap.on("locationfound", onLocationFound);
+  mapAbstraction.leafMap.on("locationerror", onLocationError);
   polylines.createPolyline();
 });
 
+// Pressing the reset button resets the map to the default position
 document.getElementById("resetPosition")!.addEventListener("click", () => {
-  mapAbstraction.centerOnPoint(mapAbstraction.playerMarker.getLatLng(), false);
+  mapAbstraction.reCenterOnPoint(
+    mapAbstraction.playerMarker.getLatLng(),
+    false,
+  );
 });
 
 // Reset functions to clear all player data
 function clearHistory() {
-  mapAbstraction.playerMarker.setLatLng(OAKES_CLASSROOM_POSITION);
-  mapAbstraction.centerOnPoint(OAKES_CLASSROOM_POSITION, false);
-  mapAbstraction.playerCoins.splice(0, mapAbstraction.playerCoins.length);
-  localStorage.removeItem("playerCaches");
-  localStorage.removeItem("playerPositions");
-  localStorage.removeItem("currentPosition");
-  localStorage.removeItem("playerCoins");
+  mapAbstraction.setPlayerMarker(OAKES_CLASSROOM_POSITION); // reset player position
+  mapAbstraction.playerCoins.splice(0, mapAbstraction.playerCoins.length); // clear all coins
+  localStorage.removeItem("playerCaches"); // clear all caches
+  localStorage.removeItem("playerPositions"); // clear all positions
+  localStorage.removeItem("currentPosition"); // clear current position
+  localStorage.removeItem("playerCoins"); // clear all coins
+  mapAbstraction.updateStatusPanel(board.tileWidth); // reset status panel
+  board.clearMemory(); // reset all caches to default states
+  polylines.clearPolylines(); // clear all polylines/paths
+  polylines.createPolyline(); // create a new path
 }
 
+// Reset button with confirmation promise
 document.getElementById("reset")!.addEventListener("click", () => {
   askQuestion().then((response) => {
     if (response) {
-      clearHistory(); // clear localStorage, playerMarker, playerCoins
-      board.updateStatusPanel(mapAbstraction); // reset status panel
-      board.clearMemory(); // reset all caches to default states
-      polylines.clearPolylines(); // clear all polylines/paths
+      // if user confirms reset
+      clearHistory(); // clear all history, reset map
       notify("redraw"); // redraw map
     }
   });
 });
 
+// Save player coins to local storage
 function saveCoins() {
   localStorage.setItem(
     "playerCoins",
@@ -136,7 +160,7 @@ function saveCoins() {
 globalThis.onbeforeunload = () => {
   try {
     polylines.savePolylines();
-    board.saveCaches();
+    board.saveAllCaches();
     localStorage.setItem(
       "currentPosition",
       JSON.stringify(mapAbstraction.playerMarker.getLatLng()),
@@ -150,49 +174,50 @@ globalThis.onbeforeunload = () => {
 // Load player data from local storage
 globalThis.onload = () => {
   try {
+    // Load map, board, and polylines
     const defaultPosition = leaflet.latLng(
       36.98949379578401,
       -122.06277128548504,
     );
     const savedCoins = localStorage.getItem("playerCoins");
     const savedPosition = localStorage.getItem("currentPosition");
+    const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 
-    mapAbstraction = newMapAbstraction(ZOOM_LEVEL, defaultPosition);
+    // Initialize map, board, and polylines
+    mapAbstraction = newMapAbstraction(
+      ZOOM_LEVEL,
+      defaultPosition,
+      statusPanel,
+    );
     if (savedPosition) {
       mapAbstraction.setPlayerMarker(JSON.parse(savedPosition));
-      mapAbstraction.centerOnPoint(JSON.parse(savedPosition), false);
     } else {
       mapAbstraction.setPlayerMarker(defaultPosition);
-      mapAbstraction.centerOnPoint(defaultPosition, false);
     }
 
-    const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
-    board = new Board(
+    board = newBoard(
       TILE_DEGREES,
       TILE_RADIUS,
       CACHE_SPAWN_PROBABILITY,
       MAX_COINS_PER_CACHE,
-      statusPanel,
     );
     board.loadKnownCaches();
 
     polylines = newPolylineAbstraction();
-    polylines.loadPolylines(mapAbstraction.map);
+    polylines.loadPolylines(mapAbstraction.leafMap);
 
-    mapAbstraction.map.on("locationfound", onLocationFound);
-    mapAbstraction.map.on("locationerror", onLocationError);
-
+    // Load player coins
     if (savedCoins) {
       const allCoins = JSON.parse(savedCoins);
       for (let i = 0; i < allCoins.length; i++) {
         mapAbstraction.playerCoins.push(
-          createCoin(allCoins[i].cell, allCoins[i].serial, mapAbstraction),
+          createCoin(allCoins[i].cell, allCoins[i].serial, board.tileWidth),
         );
       }
-      board.updateStatusPanel(mapAbstraction);
+      mapAbstraction.updateStatusPanel(board.tileWidth);
     }
 
-    redrawMap();
+    notify("redraw");
   } catch (error) {
     console.error("Error loading data on load:", error);
   }
