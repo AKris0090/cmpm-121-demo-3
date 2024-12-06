@@ -14,6 +14,7 @@ import {
   UserInterfaceAbstraction,
 } from "./UserInterface.ts";
 
+// Constants
 const OAKES_CLASSROOM_POSITION: leaflet.LatLng = leaflet.latLng(
   36.98949379578401,
   -122.06277128548504,
@@ -42,9 +43,8 @@ globalThis.onload = () => {
     const savedCoins: string | null = null;
     const savedPosition: string | null = null;
 
-    // Initialize map, board, and polylines
+    // Initialize map, board, storage and polyline abstractions
     mapAbstraction = newMapAbstraction(ZOOM_LEVEL, OAKES_CLASSROOM_POSITION);
-
     board = newBoard(
       TILE_DEGREES,
       TILE_RADIUS,
@@ -67,11 +67,13 @@ globalThis.onload = () => {
     console.log("loadedPositions", loadedPositions);
     polylines.drawLoadedPolylines(mapAbstraction.leafMap, loadedPositions);
 
+    // Initialize user interface
     userInterface = newUserInterfaceAbstraction(
       polylines,
       mapAbstraction,
       board,
     );
+    // Initialize all buttons and event listeners, and redraw the map
     userInterface.startUserInterface(
       OAKES_CLASSROOM_POSITION,
       TILE_DEGREES,

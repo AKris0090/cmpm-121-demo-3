@@ -115,6 +115,7 @@ export function newUserInterfaceAbstraction(
       this.updateStatusPanel(mapAbstraction, board.tileWidth);
       this.redrawMap();
     },
+    // Redraws the polylines on the map, then calls for the map's cells to be redrawn
     redrawMap(): void {
       this.polylines.addPointToCurrentLine(
         this.mapAbstraction.playerMarker.getLatLng(),
@@ -125,6 +126,7 @@ export function newUserInterfaceAbstraction(
         false,
       );
     },
+    // Updates the status panel with the coins the player has
     updateStatusPanel(mapAbs: MapAbstraction, tileWidth: number): void {
       this.statusPanel.innerText =
         `You have ${mapAbs.playerCoins.length} coins:`;

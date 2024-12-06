@@ -4,6 +4,7 @@ import { PolylineAbstraction } from "./PolyLineInterface.ts";
 import { MapAbstraction } from "./MapInterface.ts";
 import { BoardInterface, materializeCoins } from "./BoardInterface.ts";
 
+// Storage is an interface for saving and loading player data
 export interface Storage {
   load(
     savedCoins: string | null,
@@ -20,6 +21,7 @@ export interface Storage {
   clear(): void;
 }
 
+// savePolylines saves the polylines to local storage.
 function savePolylines(polylines: PolylineAbstraction) {
   const positions: Cell[][] = [];
   for (let i = 0; i < polylines.polyLineArray.length; i++) {
@@ -30,6 +32,7 @@ function savePolylines(polylines: PolylineAbstraction) {
   localStorage.setItem("polyLines", JSON.stringify(positions));
 }
 
+// saveCaches saves the known caches to local storage.
 function saveCaches(knownCaches: Map<string, string>) {
   localStorage.setItem(
     "playerCaches",
@@ -40,6 +43,7 @@ function saveCaches(knownCaches: Map<string, string>) {
   );
 }
 
+// saveCurrentPosition saves the player's current position to local storage.
 function saveCurrentPosition(mapAbstraction: MapAbstraction) {
   localStorage.setItem(
     "currentPosition",
@@ -47,6 +51,7 @@ function saveCurrentPosition(mapAbstraction: MapAbstraction) {
   );
 }
 
+// savePlayerCoins saves the player's coins to local storage.
 function savePlayerCoins(mapAbstraction: MapAbstraction) {
   localStorage.setItem(
     "playerCoins",
@@ -59,6 +64,7 @@ function savePlayerCoins(mapAbstraction: MapAbstraction) {
   );
 }
 
+// loadKnownCaches loads the known caches from local storage.
 function loadKnownCaches(board: BoardInterface) {
   const cacheJSON = localStorage.getItem("playerCaches");
   if (!cacheJSON) {
@@ -70,6 +76,7 @@ function loadKnownCaches(board: BoardInterface) {
   }
 }
 
+// newStorage creates a new storage object with a store, load, and clear method.
 export function newStorage(): {
   storage: Storage;
   loadedPositions: leaflet.LatLng[][] | null;
@@ -78,6 +85,7 @@ export function newStorage(): {
     localStorage.getItem("polyLines")!,
   );
   const storage: Storage = {
+    // store saves the polylines, caches, current position, and player coins to local storage.
     store(
       polylines: PolylineAbstraction,
       board: BoardInterface,
@@ -92,6 +100,7 @@ export function newStorage(): {
         console.error("Error saving data on unload:", error);
       }
     },
+    // load loads the player's coins, position, and known caches from local storage.
     load(
       savedCoins: string | null,
       savedPosition: string | null,
@@ -116,6 +125,7 @@ export function newStorage(): {
         materializeCoins(allCoins, mapAbstraction, board);
       }
     },
+    // clear clears all local storage data.
     clear() {
       localStorage.removeItem("playerCaches"); // clear all caches
       localStorage.removeItem("playerPositions"); // clear all positions
