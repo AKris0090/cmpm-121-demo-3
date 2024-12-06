@@ -203,6 +203,7 @@ globalThis.onload = () => {
     );
     board.loadKnownCaches();
 
+    // load polylines from local storage
     polylines = newPolylineAbstraction();
     polylines.loadPolylines(mapAbstraction.leafMap);
 
