@@ -2,6 +2,44 @@ import leaflet from "leaflet";
 import { BoardInterface } from "./BoardInterface.ts";
 import { PolylineAbstraction } from "./PolyLineInterface.ts";
 import { Cache, Cell, Coin } from "./Pieces.ts";
+import { UserInterfaceAbstraction } from "./UserInterface.ts";
+
+// Player movement with arrow buttons
+export function movePlayerLatLang(
+  mapAbs: MapAbstraction,
+  lat: number,
+  lng: number,
+) {
+  const currentPos = mapAbs.playerMarker.getLatLng();
+  mapAbs.setPlayerMarker(
+    leaflet.latLng(currentPos.lat + lat, currentPos.lng + lng),
+  );
+}
+
+// onLocationFound is called when the app receives a location update from the device
+export function onLocationFound(
+  userInterface: UserInterfaceAbstraction,
+  board: BoardInterface,
+  mapAbs: MapAbstraction,
+  polylines: PolylineAbstraction,
+  e: leaflet.LocationEvent,
+) {
+  const currentCell = board.getCellAtPoint({
+    x: e.latlng.lat,
+    y: e.latlng.lng,
+  });
+  if (!(currentCell === mapAbs.previousPlayerPosition)) {
+    mapAbs.setPlayerMarker(e.latlng);
+    mapAbs.previousPlayerPosition = currentCell;
+    polylines.addPointToCurrentLine(e.latlng);
+    userInterface.redrawMap();
+  }
+}
+
+// onLocationError is called when the app receives an error from the device (e.g. location services are disabled)
+export function onLocationError(e: leaflet.LocationError) {
+  alert(e.message);
+}
 
 // transferCoinFromTo is a helper function that transfers a coin from one Coin array to another.
 function transferCoinFromTo(source: Coin[], destination: Coin[]) {
@@ -77,6 +115,7 @@ function updateCachePopup(
 function collectCoinFromCell(
   mapAbs: MapAbstraction,
   boardObj: BoardInterface,
+  userInterface: UserInterfaceAbstraction,
   targetCache: Cache,
   popupDiv: HTMLDivElement,
 ) {
@@ -85,12 +124,13 @@ function collectCoinFromCell(
   boardObj.updateCacheMomento(targetCache);
   // Update the status panel and cache popup
   updateCachePopup(mapAbs, popupDiv, targetCache, boardObj.tileWidth);
-  mapAbs.updateStatusPanel(boardObj.tileWidth);
+  userInterface.updateStatusPanel(mapAbs, boardObj.tileWidth);
 }
 // depositCoinToCell deposits a coin to a cell and transfers it from the player's coins.
 function depositCoinToCell(
   mapAbs: MapAbstraction,
   boardObj: BoardInterface,
+  userInterface: UserInterfaceAbstraction,
   targetCache: Cache,
   popupDiv: HTMLDivElement,
 ) {
@@ -99,7 +139,7 @@ function depositCoinToCell(
   boardObj.updateCacheMomento(targetCache);
   // Update the status panel and cache popup
   updateCachePopup(mapAbs, popupDiv, targetCache, boardObj.tileWidth);
-  mapAbs.updateStatusPanel(boardObj.tileWidth);
+  userInterface.updateStatusPanel(mapAbs, boardObj.tileWidth);
 }
 
 // createCachePopup is a helper function that creates a cache's popup containing its coins and buttons to collect or deposit coins.
@@ -107,6 +147,7 @@ function createCachePopup(
   mapAbs: MapAbstraction,
   boardObj: BoardInterface,
   currentCache: Cache,
+  userInterface: UserInterfaceAbstraction,
 ): HTMLDivElement {
   const popupDiv = document.createElement("div");
   const xPosition: number = currentCache.cell.x * boardObj.tileWidth;
@@ -128,13 +169,19 @@ function createCachePopup(
   const getButton = document.createElement("button");
   getButton.innerText = "Collect coin";
   getButton.addEventListener("click", () => {
-    collectCoinFromCell(mapAbs, boardObj, currentCache, popupText);
+    collectCoinFromCell(
+      mapAbs,
+      boardObj,
+      userInterface,
+      currentCache,
+      popupText,
+    );
   });
 
   const putButton = document.createElement("button");
   putButton.innerText = "Deposit coin";
   putButton.addEventListener("click", () => {
-    depositCoinToCell(mapAbs, boardObj, currentCache, popupText);
+    depositCoinToCell(mapAbs, boardObj, userInterface, currentCache, popupText);
   });
 
   popupDiv!.appendChild(getButton);
@@ -147,12 +194,13 @@ function drawCache(
   mapAbs: MapAbstraction,
   boardObj: BoardInterface,
   currentCache: Cache,
+  userInterface: UserInterfaceAbstraction,
 ): void {
   const rect = boardObj.getCacheRectangle(currentCache.cell);
   rect.addTo(mapAbs.leafMap);
 
   rect.bindPopup(() => {
-    return createCachePopup(mapAbs, boardObj, currentCache);
+    return createCachePopup(mapAbs, boardObj, currentCache, userInterface);
   });
 }
 
@@ -164,19 +212,21 @@ export interface MapAbstraction {
   mapZoom: number;
   playerMarker: leaflet.Marker;
   playerCoins: Coin[];
-  statusPanel: HTMLDivElement;
+  previousPlayerPosition: Cell;
 
   reCenterOnPoint(position: leaflet.latlng, showMarker: boolean): void;
-  redrawMap(boardObj: BoardInterface, polylineAbs: PolylineAbstraction): void;
+  redrawMap(
+    boardObj: BoardInterface,
+    polylineAbs: PolylineAbstraction,
+    userInterface: UserInterfaceAbstraction,
+  ): void;
   setPlayerMarker(targetPosition: leaflet.latLng): void;
-  updateStatusPanel(tileWidth: number): void;
 }
 
 // newMapAbstraction creates and returns a new MapAbstraction object with a map, zoom level, default position, player marker, and player coins.
 export function newMapAbstraction(
   zoomLevel: number,
   defaultPosition: leaflet.LatLng,
-  statusPanel: HTMLDivElement,
 ): MapAbstraction {
   const newMapAbstraction: MapAbstraction = {
     leafMap: leaflet.map(document.getElementById("map")!, {
@@ -190,7 +240,7 @@ export function newMapAbstraction(
     mapZoom: zoomLevel,
     playerMarker: leaflet.marker(defaultPosition),
     playerCoins: [],
-    statusPanel: statusPanel,
+    previousPlayerPosition: { x: 0, y: 0 },
 
     // reCenterOnPoint centers the map on a point and optionally shows a marker.
     reCenterOnPoint(position: leaflet.latLng, showMarker: boolean = false) {
@@ -209,7 +259,11 @@ export function newMapAbstraction(
     },
 
     // redrawMap redraws the map, clears the board's visible caches and draws all polylines.
-    redrawMap(boardObj: BoardInterface, polylineAbs: PolylineAbstraction) {
+    redrawMap(
+      boardObj: BoardInterface,
+      polylineAbs: PolylineAbstraction,
+      userInterface: UserInterfaceAbstraction,
+    ) {
       clearMap(this.leafMap);
       boardObj.clearVisibleCaches();
 
@@ -221,7 +275,7 @@ export function newMapAbstraction(
       );
       for (let i = 0; i < visibleCells.length; i++) {
         const cache = boardObj.getCacheFromCell(visibleCells[i]);
-        drawCache(this, boardObj, cache);
+        drawCache(this, boardObj, cache, userInterface);
       }
     },
 
@@ -229,13 +283,6 @@ export function newMapAbstraction(
     setPlayerMarker(targetPosition: leaflet.latLng) {
       this.playerMarker.setLatLng(targetPosition);
       this.reCenterOnPoint(targetPosition, false);
-    },
-
-    // updateStatusPanel updates the status panel with the player's coins.
-    updateStatusPanel(tileWidth: number) {
-      this.statusPanel.innerText = `You have ${this.playerCoins.length} coins:`;
-      const statusPanelDiv = createCoinDiv(this, this.playerCoins, tileWidth);
-      this.statusPanel.appendChild(statusPanelDiv);
     },
   };
 

@@ -1,11 +1,29 @@
 import leaflet from "leaflet";
 import luck from "./luck.ts";
 import { MapAbstraction } from "./MapInterface.ts";
-import { Cache, Cell, newCache } from "./Pieces.ts";
+import { Cache, Cell, createCoin, newCache } from "./Pieces.ts";
+import { UserInterfaceAbstraction } from "./UserInterface.ts";
+import { PolylineAbstraction } from "./PolyLineInterface.ts";
 
 // cellToKey is a helper function that converts a cell to a string key.
 function cellToKey(cell: Cell, tileWidth: number): string {
   return [cell.x * tileWidth, cell.y * tileWidth].toString();
+}
+
+// Reset functions to clear all player data
+export function clearHistory(
+  defaultPosition: leaflet.LatLng,
+  mapAbstraction: MapAbstraction,
+  board: BoardInterface,
+  userInterface: UserInterfaceAbstraction,
+  polylines: PolylineAbstraction,
+) {
+  mapAbstraction.setPlayerMarker(defaultPosition); // reset player position
+  mapAbstraction.playerCoins.splice(0, mapAbstraction.playerCoins.length); // clear all coins
+  userInterface.updateStatusPanel(mapAbstraction, board.tileWidth); // reset status panel
+  board.clearMemory(); // reset all caches to default states
+  polylines.clearPolylines(); // clear all polylines/paths
+  polylines.createPolyline(); // create a new path
 }
 
 // generateCache creates a new cache at a cell if it doesn't already exist
@@ -59,6 +77,19 @@ function saveVisibleCaches(boardObj: BoardInterface) {
   });
 }
 
+// materializeCoins creates coins at all the cells in allCoins and adds them to the mapAbstraction's playerCoins array.
+export function materializeCoins(
+  allCoins: { cell: Cell; serial: number }[],
+  mapAbstraction: MapAbstraction,
+  board: BoardInterface,
+) {
+  for (let i = 0; i < allCoins.length; i++) {
+    mapAbstraction.playerCoins.push(
+      createCoin(allCoins[i].cell, allCoins[i].serial, board.tileWidth),
+    );
+  }
+}
+
 // BoardInterface is an interface that represents the game board.
 // It contains methods for managing the game board state.
 export interface BoardInterface {
@@ -77,8 +108,6 @@ export interface BoardInterface {
   getCellsNearPoint(position: leaflet.LatLng, mapAbs: MapAbstraction): Cell[];
   updateCacheMomento(currentCache: Cache): void;
   clearVisibleCaches(): void;
-  loadKnownCaches(): void;
-  saveAllCaches(): void;
   clearMemory(): void;
 }
 
@@ -165,29 +194,6 @@ export function newBoard(
     clearVisibleCaches() {
       saveVisibleCaches(this);
       this.currentlyVisibleCaches.clear();
-    },
-
-    // loadKnownCaches loads the known caches from localStorage.
-    loadKnownCaches() {
-      const cacheJSON = localStorage.getItem("playerCaches");
-      if (!cacheJSON) {
-        return;
-      }
-      const parsedCaches = JSON.parse(cacheJSON!);
-      for (let i = 0; i < parsedCaches.caches.length; i++) {
-        this.knownCaches.set(parsedCaches.cacheKeys[i], parsedCaches.caches[i]);
-      }
-    },
-
-    // saveAllCaches saves all the known caches to localStorage.
-    saveAllCaches(): void {
-      localStorage.setItem(
-        "playerCaches",
-        JSON.stringify({
-          cacheKeys: Array.from(this.knownCaches.keys()),
-          caches: Array.from(this.knownCaches.values()),
-        }),
-      );
     },
 
     // clearMemory clears all the known caches and cells from the board.

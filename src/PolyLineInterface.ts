@@ -1,5 +1,4 @@
 import leaflet from "leaflet";
-import { Cell } from "./Pieces.ts";
 
 // PolylineAbstraction is an interface that represents a collection of polylines
 // on a map. It provides methods to create, save, load, draw, and clear polylines.
@@ -11,8 +10,10 @@ export interface PolylineAbstraction {
 
   createPolyline(): leaflet.Polyline;
   addPointToCurrentLine(position: leaflet.LatLng): void;
-  loadPolylines(map: leaflet.Map): void;
-  savePolylines(): void;
+  drawLoadedPolylines(
+    map: leaflet.Map,
+    loadedPositions: leaflet.latlng[][] | null,
+  ): void;
   drawPolylines(map: leaflet.Map): void;
   clearPolylines(): void;
 }
@@ -37,10 +38,10 @@ export function newPolylineAbstraction(): PolylineAbstraction {
     },
 
     // Load polylines from local storage
-    loadPolylines(map: leaflet.Map) {
-      const loadedPositions: leaflet.LatLng[][] = JSON.parse(
-        localStorage.getItem("polyLines")!,
-      );
+    drawLoadedPolylines(
+      map: leaflet.Map,
+      loadedPositions: leaflet.LatLng[][] | null,
+    ) {
       if (!loadedPositions) {
         this.createPolyline();
         return;
@@ -63,17 +64,6 @@ export function newPolylineAbstraction(): PolylineAbstraction {
       this.drawPolylines(map);
     },
 
-    // Save all polylines to local storage
-    savePolylines() {
-      const positions: Cell[][] = [];
-      for (let i = 0; i < this.polyLineArray.length; i++) {
-        if (this.polyLineArray[i].getLatLngs().length > 1) {
-          positions.push(this.polyLineArray[i].getLatLngs());
-        }
-      }
-      localStorage.setItem("polyLines", JSON.stringify(positions));
-    },
-
     // Draw all polylines on the map
     drawPolylines(map: leaflet.Map) {
       for (let i = 0; i < this.polyLineArray.length; i++) {
@@ -88,7 +78,6 @@ export function newPolylineAbstraction(): PolylineAbstraction {
       }
       this.polyLineArray = [];
       this.currentPolyLineIndex = 0;
-      localStorage.removeItem("polyLines");
     },
   };
 
